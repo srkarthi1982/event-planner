@@ -1,0 +1,198 @@
+---
+import { actions } from "astro:actions";
+import { AvButton, AvCard, AvContainer } from "@ansiversa/components";
+import AvMiniAppBar from "../../../components/AvMiniAppBar.astro";
+import AppShell from "../../../layouts/AppShell.astro";
+import { getEventDetail } from "../../../lib/events";
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect("/");
+const id = Astro.params.id as string;
+
+let flash: { type: "success" | "error"; message: string } | null = null;
+
+function value(formData: FormData, key: string) {
+  const raw = formData.get(key);
+  return typeof raw === "string" ? raw : "";
+}
+
+if (Astro.request.method === "POST") {
+  const formData = await Astro.request.formData();
+  const intent = value(formData, "intent");
+
+  try {
+    if (intent === "add-task") {
+      await Astro.callAction(actions.createEventTask, {
+        eventId: id,
+        title: value(formData, "title"),
+        description: value(formData, "description") || null,
+        dueAt: value(formData, "dueAt") || null,
+      });
+      flash = { type: "success", message: "Task added." };
+    }
+    if (intent === "update-task") {
+      await Astro.callAction(actions.updateEventTask, {
+        id: value(formData, "taskId"),
+        title: value(formData, "title"),
+        description: value(formData, "description") || null,
+        dueAt: value(formData, "dueAt") || null,
+      });
+      flash = { type: "success", message: "Task updated." };
+    }
+    if (intent === "delete-task") {
+      await Astro.callAction(actions.deleteEventTask, { id: value(formData, "taskId") });
+      flash = { type: "success", message: "Task deleted." };
+    }
+    if (intent === "toggle-task") {
+      await Astro.callAction(actions.toggleEventTaskComplete, {
+        id: value(formData, "taskId"),
+        isCompleted: value(formData, "isCompleted") === "true",
+      });
+      flash = { type: "success", message: "Task status updated." };
+    }
+    if (intent === "add-guest") {
+      await Astro.callAction(actions.createEventGuest, {
+        eventId: id,
+        name: value(formData, "name"),
+        email: value(formData, "email") || null,
+        phone: value(formData, "phone") || null,
+        status: (value(formData, "status") || "invited") as "invited" | "confirmed" | "declined" | "maybe",
+        notes: value(formData, "notes") || null,
+      });
+      flash = { type: "success", message: "Guest added." };
+    }
+    if (intent === "update-guest") {
+      await Astro.callAction(actions.updateEventGuest, {
+        id: value(formData, "guestId"),
+        name: value(formData, "name"),
+        email: value(formData, "email") || null,
+        phone: value(formData, "phone") || null,
+        status: (value(formData, "status") || "invited") as "invited" | "confirmed" | "declined" | "maybe",
+        notes: value(formData, "notes") || null,
+      });
+      flash = { type: "success", message: "Guest updated." };
+    }
+    if (intent === "delete-guest") {
+      await Astro.callAction(actions.deleteEventGuest, { id: value(formData, "guestId") });
+      flash = { type: "success", message: "Guest removed." };
+    }
+  } catch (error) {
+    flash = { type: "error", message: error instanceof Error ? error.message : "Something went wrong." };
+  }
+}
+
+const { event, tasks, guests } = await getEventDetail(user.id, id);
+const stats = {
+  totalTasks: tasks.length,
+  completedTasks: tasks.filter((task) => task.isCompleted).length,
+  totalGuests: guests.length,
+  confirmedGuests: guests.filter((guest) => guest.status === "confirmed").length,
+};
+---
+
+<AppShell title={`${event.title} | Event Planner`} description="Event details">
+  <AvMiniAppBar title={event.title} />
+  <main class="min-h-screen bg-slate-950 pb-16 text-slate-100" x-data x-init="$store.eventPlanner.init({ activeEventId: '${event.id}' })">
+    <AvContainer size="wide" className="space-y-6 py-6">
+      <a href="/app" class="text-sm text-sky-300 hover:text-sky-200">← Back to events</a>
+
+      {flash && (
+        <div class={`rounded-xl border px-4 py-3 text-sm ${flash.type === "success" ? "border-emerald-700 bg-emerald-950/60 text-emerald-200" : "border-rose-700 bg-rose-950/60 text-rose-200"}`}>
+          {flash.message}
+        </div>
+      )}
+
+      <AvCard className="space-y-4 p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold">{event.title}</h1>
+            <p class="text-sm text-slate-400">{event.eventType ?? "General"} · {event.status}</p>
+          </div>
+          <AvButton href="/app" variant="ghost" size="sm">Return</AvButton>
+        </div>
+        <div class="grid gap-3 text-sm text-slate-300 sm:grid-cols-3">
+          <p><span class="text-slate-500">Location:</span> {event.location ?? "—"}</p>
+          <p><span class="text-slate-500">Starts:</span> {event.startsAt ? new Date(event.startsAt).toLocaleString() : "—"}</p>
+          <p><span class="text-slate-500">Ends:</span> {event.endsAt ? new Date(event.endsAt).toLocaleString() : "—"}</p>
+        </div>
+        <p class="rounded-xl border border-slate-800 bg-slate-900/70 p-3 text-sm text-slate-300">{event.notes || "No notes yet."}</p>
+      </AvCard>
+
+      <section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <AvCard className="p-4"><p class="text-xs text-slate-400">Total tasks</p><p class="text-2xl font-semibold">{stats.totalTasks}</p></AvCard>
+        <AvCard className="p-4"><p class="text-xs text-slate-400">Completed tasks</p><p class="text-2xl font-semibold">{stats.completedTasks}</p></AvCard>
+        <AvCard className="p-4"><p class="text-xs text-slate-400">Total guests</p><p class="text-2xl font-semibold">{stats.totalGuests}</p></AvCard>
+        <AvCard className="p-4"><p class="text-xs text-slate-400">Confirmed guests</p><p class="text-2xl font-semibold">{stats.confirmedGuests}</p></AvCard>
+      </section>
+
+      <section class="grid gap-6 xl:grid-cols-2">
+        <AvCard className="space-y-4 p-4">
+          <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">Tasks</h2><button class="text-sm text-sky-300" x-on:click="$store.eventPlanner.openDrawer('createTask')">Add task</button></div>
+          <ul class="space-y-2">
+            {tasks.map((task) => (
+              <li class="rounded-lg border border-slate-800 p-3">
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <p class={`font-medium ${task.isCompleted ? "line-through text-slate-500" : "text-slate-100"}`}>{task.title}</p>
+                    <p class="text-xs text-slate-400">Due: {task.dueAt ? new Date(task.dueAt).toLocaleString() : "—"}</p>
+                    {task.description && <p class="mt-1 text-sm text-slate-300">{task.description}</p>}
+                  </div>
+                  <div class="flex gap-2">
+                    <form method="post"><input type="hidden" name="intent" value="toggle-task" /><input type="hidden" name="taskId" value={task.id} /><input type="hidden" name="isCompleted" value={task.isCompleted ? "false" : "true"} /><button class="text-xs text-sky-300">{task.isCompleted ? "Undo" : "Done"}</button></form>
+                    <form method="post"><input type="hidden" name="intent" value="delete-task" /><input type="hidden" name="taskId" value={task.id} /><button class="text-xs text-rose-300">Delete</button></form>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </AvCard>
+
+        <AvCard className="space-y-4 p-4">
+          <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">Guests</h2><button class="text-sm text-sky-300" x-on:click="$store.eventPlanner.openDrawer('createGuest')">Add guest</button></div>
+          <ul class="space-y-2">
+            {guests.map((guest) => (
+              <li class="rounded-lg border border-slate-800 p-3">
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <p class="font-medium">{guest.name}</p>
+                    <p class="text-xs text-slate-400">{guest.status} · {guest.email ?? "No email"}</p>
+                    {guest.notes && <p class="mt-1 text-sm text-slate-300">{guest.notes}</p>}
+                  </div>
+                  <form method="post"><input type="hidden" name="intent" value="delete-guest" /><input type="hidden" name="guestId" value={guest.id} /><button class="text-xs text-rose-300">Delete</button></form>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </AvCard>
+      </section>
+    </AvContainer>
+
+    <section class="fixed inset-0 z-20 hidden items-end justify-center bg-slate-950/70 p-4" :class="$store.eventPlanner.drawers.createTask ? 'flex' : 'hidden'" x-cloak>
+      <AvCard className="w-full max-w-xl space-y-3 p-5">
+        <div class="flex items-center justify-between"><h3 class="font-semibold">Add task</h3><button x-on:click="$store.eventPlanner.closeDrawer('createTask')">Close</button></div>
+        <form method="post" class="grid gap-3">
+          <input type="hidden" name="intent" value="add-task" />
+          <input required name="title" placeholder="Task title" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2" />
+          <input type="datetime-local" name="dueAt" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2" />
+          <textarea name="description" rows="3" placeholder="Description" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2"></textarea>
+          <button class="rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950">Save task</button>
+        </form>
+      </AvCard>
+    </section>
+
+    <section class="fixed inset-0 z-20 hidden items-end justify-center bg-slate-950/70 p-4" :class="$store.eventPlanner.drawers.createGuest ? 'flex' : 'hidden'" x-cloak>
+      <AvCard className="w-full max-w-xl space-y-3 p-5">
+        <div class="flex items-center justify-between"><h3 class="font-semibold">Add guest</h3><button x-on:click="$store.eventPlanner.closeDrawer('createGuest')">Close</button></div>
+        <form method="post" class="grid gap-3 sm:grid-cols-2">
+          <input type="hidden" name="intent" value="add-guest" />
+          <input required name="name" placeholder="Name" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 sm:col-span-2" />
+          <input name="email" placeholder="Email" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2" />
+          <input name="phone" placeholder="Phone" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2" />
+          <select name="status" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 sm:col-span-2"><option>invited</option><option>confirmed</option><option>maybe</option><option>declined</option></select>
+          <textarea name="notes" rows="3" placeholder="Notes" class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 sm:col-span-2"></textarea>
+          <button class="rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 sm:col-span-2">Save guest</button>
+        </form>
+      </AvCard>
+    </section>
+  </main>
+</AppShell>

@@ -1,93 +1,44 @@
 ---
+import { AvButton, AvCard, AvContainer } from "@ansiversa/components";
+import AvMiniAppBar from "../components/AvMiniAppBar.astro";
 import AppShell from "../layouts/AppShell.astro";
-import { AvContainer, AvButton } from "@ansiversa/components";
 
-const title = "Event Planner – Ansiversa";
-const description = "Plan events with timelines.";
+const title = "Event Planner | Ansiversa";
+const description = "A calm, premium space to plan events, track tasks, and manage your guest list.";
 ---
 
 <AppShell title={title} description={description}>
-  <!-- Hero -->
-  <section class="av-hero">
-    <AvContainer size="narrow" className="av-hero__content--narrow">
-      <div class="av-hero__content">
-        <div class="av-kicker">
-          <span>Lifestyle & Personal · Ansiversa Mini App</span>
+  <AvMiniAppBar title="Event Planner" />
+  <main class="bg-slate-950 text-slate-100">
+    <section class="border-b border-slate-800 py-20 sm:py-24">
+      <AvContainer size="narrow" className="space-y-7 text-center">
+        <p class="text-xs uppercase tracking-[0.2em] text-sky-300">Plan with confidence</p>
+        <h1 class="text-4xl font-semibold leading-tight sm:text-5xl">One elegant place to run every event.</h1>
+        <p class="mx-auto max-w-2xl text-slate-300">
+          Event Planner gives you a clear plan, a reliable checklist, and a guest view you can trust — without clutter.
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-3">
+          <AvButton href="/app">Open workspace</AvButton>
+          <AvButton href="/app" variant="ghost">View your events</AvButton>
         </div>
-        <h1 class="av-gradient-text">Event Planner</h1>
-        <p>
-          Plan events with timelines.
-        </p>
-      </div>
-      <div class="av-cta-row">
-        <AvButton href="https://event-planner.ansiversa.com">Launch Event</AvButton>
-      </div>
-    </AvContainer>
-  </section>
+      </AvContainer>
+    </section>
 
-  <!-- Problem -->
-  <section class="av-section">
-    <AvContainer size="narrow">
-      <div class="av-section-header">
-        <h2 class="av-section-title">The problem it solves</h2>
-        <p class="av-section-lead">
-          Personal goals, habits, and routines are easy to start and hard to maintain.
-        </p>
-      </div>
-      <div class="av-section-body space-y-3 text-slate-300">
-        <p>Event Planner keeps this one area of your life simple, trackable, and encouraging.</p>
-      </div>
-    </AvContainer>
-  </section>
-
-  <!-- Why this mini app -->
-  <section class="av-section">
-    <AvContainer size="narrow">
-      <div class="av-section-header">
-        <h2 class="av-section-title">Why Event Planner feels different</h2>
-        <p class="av-section-lead">
-          A focused mini app inside the larger Ansiversa ecosystem.
-        </p>
-      </div>
-      <div class="av-section-body">
-        <ul class="space-y-2 text-slate-300 list-disc list-inside">
-          <li>Designed for real daily life, not perfect theory.</li>
-          <li>Helps you see progress in small, manageable steps.</li>
-          <li>Works alongside other Ansiversa tools that support your day.</li>
-        </ul>
-      </div>
-    </AvContainer>
-  </section>
-
-  <!-- How it works -->
-  <section class="av-section">
-    <AvContainer size="narrow">
-      <div class="av-section-header">
-        <h2 class="av-section-title">How it works</h2>
-        <p class="av-section-lead">
-          Simple, clear steps so people can start in under a minute.
-        </p>
-      </div>
-      <ol class="av-section-body space-y-2 text-slate-300 list-decimal list-inside">
-        <li>Open Event Planner at the start or end of your day.</li>
-        <li>Add or update your latest actions, plans, or reflections.</li>
-        <li>Review your progress and adjust your next small step.</li>
-      </ol>
-    </AvContainer>
-  </section>
-
-  <!-- Final CTA -->
-  <section class="av-section">
-    <AvContainer size="narrow">
-      <div class="av-section-header">
-        <h2 class="av-section-title">Ready to try Event Planner?</h2>
-        <p class="av-section-lead">
-          Open the app, follow the simple flow, and let it handle the heavy lifting.
-        </p>
-      </div>
-      <div class="av-cta-row">
-        <AvButton href="https://event-planner.ansiversa.com">Start with Event</AvButton>
-      </div>
-    </AvContainer>
-  </section>
+    <section class="py-14">
+      <AvContainer size="wide" className="grid gap-4 sm:grid-cols-3">
+        <AvCard className="space-y-2 p-5">
+          <h2 class="text-lg font-semibold text-white">Event basics</h2>
+          <p class="text-sm text-slate-300">Capture title, type, schedule, location, and notes in one smooth flow.</p>
+        </AvCard>
+        <AvCard className="space-y-2 p-5">
+          <h2 class="text-lg font-semibold text-white">Task tracking</h2>
+          <p class="text-sm text-slate-300">Keep preparation visible with status, due dates, and completion progress.</p>
+        </AvCard>
+        <AvCard className="space-y-2 p-5">
+          <h2 class="text-lg font-semibold text-white">Guest clarity</h2>
+          <p class="text-sm text-slate-300">Manage invited, confirmed, maybe, and declined guests with clean context.</p>
+        </AvCard>
+      </AvContainer>
+    </section>
+  </main>
 </AppShell>

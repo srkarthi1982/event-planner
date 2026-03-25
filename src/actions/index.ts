@@ -1,292 +1,222 @@
-import type { ActionAPIContext } from "astro:actions";
-import { ActionError, defineAction } from "astro:actions";
+import { defineAction } from "astro:actions";
 import { z } from "astro:schema";
-import { db, eq, and, Events, EventTasks, EventGuests } from "astro:db";
+import { db, eq, EventGuests, Events, EventTasks } from "astro:db";
+import {
+  assertValidRange,
+  getEventDetail,
+  getGuestForOwnedEvent,
+  getNextGuestSortOrder,
+  getNextTaskSortOrder,
+  getOwnedEvent,
+  getTaskForOwnedEvent,
+  listEvents,
+  parseOptionalDate,
+  requireUser,
+} from "../lib/events";
+import { sendHighSignalNotification, syncDashboardSummary } from "../lib/integrations";
 
-function requireUser(context: ActionAPIContext) {
-  const locals = context.locals as App.Locals | undefined;
-  const user = locals?.user;
-
-  if (!user) {
-    throw new ActionError({
-      code: "UNAUTHORIZED",
-      message: "You must be signed in to perform this action.",
-    });
-  }
-
-  return user;
-}
-
-function parseOptionalDate(value?: string | null) {
-  return value ? new Date(value) : undefined;
-}
-
-async function getEventForUser(userId: string, eventId: string) {
-  const event = (
-    await db.select().from(Events).where(eq(Events.id, eventId))
-  )[0];
-
-  if (!event) {
-    throw new ActionError({
-      code: "NOT_FOUND",
-      message: "Event not found.",
-    });
-  }
-
-  if (event.ownerUserId !== userId) {
-    throw new ActionError({
-      code: "FORBIDDEN",
-      message: "You do not have access to this event.",
-    });
-  }
-
-  return event;
-}
-
-const EVENT_STATUSES = ["planning", "confirmed", "done", "cancelled"] as const;
-const TASK_STATUSES = ["todo", "in-progress", "done"] as const;
-const TASK_PRIORITIES = ["low", "medium", "high"] as const;
-const RSVP_STATUSES = ["invited", "going", "maybe", "declined"] as const;
+const eventStatusSchema = z.enum(["draft", "planned", "completed", "archived", "cancelled"]);
+const eventTypeSchema = z.enum(["birthday", "meeting", "wedding", "trip", "party", "personal", "other"]);
+const guestStatusSchema = z.enum(["invited", "confirmed", "declined", "maybe"]);
 
 export const server = {
   createEvent: defineAction({
     input: z.object({
       title: z.string().min(1),
-      description: z.string().optional(),
-      startDateTime: z.string().datetime().optional(),
-      endDateTime: z.string().datetime().optional(),
-      timeZone: z.string().optional(),
-      locationName: z.string().optional(),
-      locationAddress: z.string().optional(),
-      locationMapLink: z.string().url().optional(),
-      status: z.enum(EVENT_STATUSES).default("planning"),
+      eventType: eventTypeSchema.nullish(),
+      location: z.string().max(240).nullish(),
+      startsAt: z.string().nullish(),
+      endsAt: z.string().nullish(),
+      notes: z.string().max(3000).nullish(),
+      status: eventStatusSchema.default("planned"),
     }),
     handler: async (input, context) => {
       const user = requireUser(context);
+      const startsAt = parseOptionalDate(input.startsAt);
+      const endsAt = parseOptionalDate(input.endsAt);
+      assertValidRange(startsAt, endsAt);
       const now = new Date();
 
       const event = {
         id: crypto.randomUUID(),
-        ownerUserId: user.id,
-        title: input.title,
-        description: input.description,
-        startDateTime: parseOptionalDate(input.startDateTime),
-        endDateTime: parseOptionalDate(input.endDateTime),
-        timeZone: input.timeZone,
-        locationName: input.locationName,
-        locationAddress: input.locationAddress,
-        locationMapLink: input.locationMapLink,
-        status: input.status ?? "planning",
+        userId: user.id,
+        title: input.title.trim(),
+        eventType: input.eventType ?? null,
+        location: input.location?.trim() || null,
+        startsAt,
+        endsAt,
+        notes: input.notes?.trim() || null,
+        status: input.status,
         createdAt: now,
         updatedAt: now,
-      } satisfies typeof Events.$inferSelect;
+        archivedAt: input.status === "archived" ? now : null,
+      } satisfies typeof Events.$inferInsert;
 
       await db.insert(Events).values(event);
+      await syncDashboardSummary(user.id);
+      await sendHighSignalNotification({
+        userId: user.id,
+        title: "Event created",
+        body: `“${event.title}” is now in your planner.`,
+      });
 
-      return {
-        success: true,
-        data: { event },
-      };
+      return { success: true, data: event };
     },
   }),
 
   updateEvent: defineAction({
-    input: z
-      .object({
-        id: z.string(),
-        title: z.string().min(1).optional(),
-        description: z.string().optional(),
-        startDateTime: z.string().datetime().optional(),
-        endDateTime: z.string().datetime().optional(),
-        timeZone: z.string().optional(),
-        locationName: z.string().optional(),
-        locationAddress: z.string().optional(),
-        locationMapLink: z.string().url().optional(),
-        status: z.enum(EVENT_STATUSES).optional(),
-      })
-      .refine(
-        (value) =>
-          value.title !== undefined ||
-          value.description !== undefined ||
-          value.startDateTime !== undefined ||
-          value.endDateTime !== undefined ||
-          value.timeZone !== undefined ||
-          value.locationName !== undefined ||
-          value.locationAddress !== undefined ||
-          value.locationMapLink !== undefined ||
-          value.status !== undefined,
-        {
-          message: "At least one field must be provided to update the event.",
-        },
-      ),
-    handler: async (input, context) => {
-      const user = requireUser(context);
-      const existing = await getEventForUser(user.id, input.id);
-      const now = new Date();
-
-      const updates: Partial<typeof Events.$inferSelect> = {
-        updatedAt: now,
-      };
-
-      if (input.title !== undefined) updates.title = input.title;
-      if (input.description !== undefined) updates.description = input.description;
-      if (input.startDateTime !== undefined)
-        updates.startDateTime = parseOptionalDate(input.startDateTime);
-      if (input.endDateTime !== undefined)
-        updates.endDateTime = parseOptionalDate(input.endDateTime);
-      if (input.timeZone !== undefined) updates.timeZone = input.timeZone;
-      if (input.locationName !== undefined) updates.locationName = input.locationName;
-      if (input.locationAddress !== undefined)
-        updates.locationAddress = input.locationAddress;
-      if (input.locationMapLink !== undefined)
-        updates.locationMapLink = input.locationMapLink;
-      if (input.status !== undefined) updates.status = input.status;
-
-      await db.update(Events).set(updates).where(eq(Events.id, input.id));
-
-      return {
-        success: true,
-        data: { event: { ...existing, ...updates } },
-      };
-    },
-  }),
-
-  deleteEvent: defineAction({
-    input: z.object({ id: z.string() }),
-    handler: async (input, context) => {
-      const user = requireUser(context);
-      await getEventForUser(user.id, input.id);
-
-      await db.delete(Events).where(eq(Events.id, input.id));
-      await db.delete(EventTasks).where(eq(EventTasks.eventId, input.id));
-      await db.delete(EventGuests).where(eq(EventGuests.eventId, input.id));
-
-      return {
-        success: true,
-      };
-    },
-  }),
-
-  listMyEvents: defineAction({
-    input: z.object({ status: z.enum(EVENT_STATUSES).optional() }).optional(),
-    handler: async (input, context) => {
-      const user = requireUser(context);
-
-      const statusFilter = input?.status
-        ? and(eq(Events.ownerUserId, user.id), eq(Events.status, input.status))
-        : eq(Events.ownerUserId, user.id);
-
-      const events = await db.select().from(Events).where(statusFilter);
-
-      return {
-        success: true,
-        data: { items: events, total: events.length },
-      };
-    },
-  }),
-
-  getEventWithDetails: defineAction({
-    input: z.object({ id: z.string() }),
-    handler: async (input, context) => {
-      const user = requireUser(context);
-      const event = await getEventForUser(user.id, input.id);
-
-      const [tasks, guests] = await Promise.all([
-        db
-          .select()
-          .from(EventTasks)
-          .where(eq(EventTasks.eventId, input.id)),
-        db
-          .select()
-          .from(EventGuests)
-          .where(eq(EventGuests.eventId, input.id)),
-      ]);
-
-      return {
-        success: true,
-        data: { event, tasks, guests },
-      };
-    },
-  }),
-
-  upsertEventTask: defineAction({
     input: z.object({
-      id: z.string().optional(),
-      eventId: z.string(),
-      title: z.string().min(1),
-      description: z.string().optional(),
-      dueDate: z.string().datetime().optional(),
-      status: z.enum(TASK_STATUSES).default("todo"),
-      priority: z.enum(TASK_PRIORITIES).optional(),
-      userId: z.string().optional(),
+      id: z.string(),
+      title: z.string().min(1).optional(),
+      eventType: eventTypeSchema.nullish(),
+      location: z.string().max(240).nullish(),
+      startsAt: z.string().nullish(),
+      endsAt: z.string().nullish(),
+      notes: z.string().max(3000).nullish(),
+      status: eventStatusSchema.optional(),
     }),
     handler: async (input, context) => {
       const user = requireUser(context);
-      const event = await getEventForUser(user.id, input.eventId);
+      const existing = await getOwnedEvent(user.id, input.id);
+      const startsAt = input.startsAt === undefined ? existing.startsAt : parseOptionalDate(input.startsAt);
+      const endsAt = input.endsAt === undefined ? existing.endsAt : parseOptionalDate(input.endsAt);
+      assertValidRange(startsAt, endsAt);
       const now = new Date();
 
-      if (input.id) {
-        const existing = (
-          await db
-            .select()
-            .from(EventTasks)
-            .where(eq(EventTasks.id, input.id))
-        )[0];
+      const updates = {
+        ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+        ...(input.eventType !== undefined ? { eventType: input.eventType ?? null } : {}),
+        ...(input.location !== undefined ? { location: input.location?.trim() || null } : {}),
+        ...(input.startsAt !== undefined ? { startsAt } : {}),
+        ...(input.endsAt !== undefined ? { endsAt } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.status === "archived" ? { archivedAt: now } : {}),
+        ...(input.status && input.status !== "archived" ? { archivedAt: null } : {}),
+        updatedAt: now,
+      } satisfies Partial<typeof Events.$inferInsert>;
 
-        if (!existing) {
-          throw new ActionError({
-            code: "NOT_FOUND",
-            message: "Task not found.",
-          });
-        }
+      await db.update(Events).set(updates).where(eq(Events.id, input.id));
 
-        if (existing.eventId !== event.id) {
-          throw new ActionError({
-            code: "FORBIDDEN",
-            message: "You cannot move tasks to another event.",
-          });
-        }
-
-        const updates: Partial<typeof EventTasks.$inferSelect> = {
-          title: input.title,
-          description: input.description,
-          dueDate: parseOptionalDate(input.dueDate),
-          status: input.status ?? existing.status,
-          priority: input.priority,
-          userId: input.userId,
-          updatedAt: now,
-        };
-
-        await db
-          .update(EventTasks)
-          .set(updates)
-          .where(eq(EventTasks.id, input.id));
-
-        return {
-          success: true,
-          data: { task: { ...existing, ...updates } },
-        };
+      if (input.status === "completed" && existing.status !== "completed") {
+        await sendHighSignalNotification({
+          userId: user.id,
+          title: "Event completed",
+          body: `Nice work — “${existing.title}” has been marked complete.`,
+          level: "success",
+        });
       }
 
-      const task = {
+      await syncDashboardSummary(user.id);
+      return { success: true };
+    },
+  }),
+
+  archiveEvent: defineAction({
+    input: z.object({ id: z.string() }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      await getOwnedEvent(user.id, input.id);
+      const now = new Date();
+
+      await db
+        .update(Events)
+        .set({ status: "archived", archivedAt: now, updatedAt: now })
+        .where(eq(Events.id, input.id));
+
+      await syncDashboardSummary(user.id);
+      return { success: true };
+    },
+  }),
+
+  restoreEvent: defineAction({
+    input: z.object({ id: z.string(), status: eventStatusSchema.default("planned") }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      await getOwnedEvent(user.id, input.id);
+      const now = new Date();
+
+      await db
+        .update(Events)
+        .set({ status: input.status === "archived" ? "planned" : input.status, archivedAt: null, updatedAt: now })
+        .where(eq(Events.id, input.id));
+
+      await syncDashboardSummary(user.id);
+      return { success: true };
+    },
+  }),
+
+  createEventTask: defineAction({
+    input: z.object({
+      eventId: z.string(),
+      title: z.string().min(1),
+      description: z.string().max(2000).nullish(),
+      dueAt: z.string().nullish(),
+    }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      await getOwnedEvent(user.id, input.eventId);
+      const now = new Date();
+
+      await db.insert(EventTasks).values({
         id: crypto.randomUUID(),
-        eventId: event.id,
-        userId: input.userId,
-        title: input.title,
-        description: input.description,
-        dueDate: parseOptionalDate(input.dueDate),
-        status: input.status ?? "todo",
-        priority: input.priority,
+        eventId: input.eventId,
+        title: input.title.trim(),
+        description: input.description?.trim() || null,
+        isCompleted: false,
+        dueAt: parseOptionalDate(input.dueAt),
+        sortOrder: await getNextTaskSortOrder(input.eventId),
         createdAt: now,
         updatedAt: now,
-      } satisfies typeof EventTasks.$inferSelect;
+        completedAt: null,
+      });
 
-      await db.insert(EventTasks).values(task);
+      return { success: true };
+    },
+  }),
 
-      return {
-        success: true,
-        data: { task },
-      };
+  updateEventTask: defineAction({
+    input: z.object({
+      id: z.string(),
+      title: z.string().min(1),
+      description: z.string().max(2000).nullish(),
+      dueAt: z.string().nullish(),
+    }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      const existing = await getTaskForOwnedEvent(user.id, input.id);
+
+      await db
+        .update(EventTasks)
+        .set({
+          title: input.title.trim(),
+          description: input.description?.trim() || null,
+          dueAt: parseOptionalDate(input.dueAt),
+          updatedAt: new Date(),
+        })
+        .where(eq(EventTasks.id, existing.id));
+
+      return { success: true };
+    },
+  }),
+
+  toggleEventTaskComplete: defineAction({
+    input: z.object({ id: z.string(), isCompleted: z.boolean() }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      const existing = await getTaskForOwnedEvent(user.id, input.id);
+      const now = new Date();
+
+      await db
+        .update(EventTasks)
+        .set({
+          isCompleted: input.isCompleted,
+          completedAt: input.isCompleted ? now : null,
+          updatedAt: now,
+        })
+        .where(eq(EventTasks.id, existing.id));
+
+      return { success: true };
     },
   }),
 
@@ -294,106 +224,104 @@ export const server = {
     input: z.object({ id: z.string() }),
     handler: async (input, context) => {
       const user = requireUser(context);
-      const existing = (
-        await db.select().from(EventTasks).where(eq(EventTasks.id, input.id))
-      )[0];
-
-      if (!existing) {
-        throw new ActionError({
-          code: "NOT_FOUND",
-          message: "Task not found.",
-        });
-      }
-
-      await getEventForUser(user.id, existing.eventId);
-
-      await db.delete(EventTasks).where(eq(EventTasks.id, input.id));
-
-      return {
-        success: true,
-      };
+      const existing = await getTaskForOwnedEvent(user.id, input.id);
+      await db.delete(EventTasks).where(eq(EventTasks.id, existing.id));
+      return { success: true };
     },
   }),
 
-  upsertEventGuest: defineAction({
+  reorderEventTasks: defineAction({
+    input: z.object({ eventId: z.string(), orderedTaskIds: z.array(z.string()).min(1) }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      await getOwnedEvent(user.id, input.eventId);
+
+      const tasks = await db.select().from(EventTasks).where(eq(EventTasks.eventId, input.eventId));
+      const ids = new Set(tasks.map((task) => task.id));
+      if (!input.orderedTaskIds.every((id) => ids.has(id))) {
+        return { success: false, message: "Invalid task order payload." };
+      }
+
+      await Promise.all(
+        input.orderedTaskIds.map((id, index) =>
+          db.update(EventTasks).set({ sortOrder: index + 1, updatedAt: new Date() }).where(eq(EventTasks.id, id)),
+        ),
+      );
+
+      return { success: true };
+    },
+  }),
+
+  createEventGuest: defineAction({
     input: z.object({
-      id: z.string().optional(),
       eventId: z.string(),
       name: z.string().min(1),
-      email: z.string().email().optional(),
-      phone: z.string().optional(),
-      rsvpStatus: z.enum(RSVP_STATUSES).optional(),
-      notes: z.string().optional(),
-      invitedAt: z.string().datetime().optional(),
-      respondedAt: z.string().datetime().optional(),
+      email: z.string().email().nullish(),
+      phone: z.string().max(50).nullish(),
+      status: guestStatusSchema.default("invited"),
+      notes: z.string().max(2000).nullish(),
     }),
     handler: async (input, context) => {
       const user = requireUser(context);
-      const event = await getEventForUser(user.id, input.eventId);
+      await getOwnedEvent(user.id, input.eventId);
       const now = new Date();
 
-      if (input.id) {
-        const existing = (
-          await db
-            .select()
-            .from(EventGuests)
-            .where(eq(EventGuests.id, input.id))
-        )[0];
+      await db.insert(EventGuests).values({
+        id: crypto.randomUUID(),
+        eventId: input.eventId,
+        name: input.name.trim(),
+        email: input.email?.trim() || null,
+        phone: input.phone?.trim() || null,
+        status: input.status,
+        notes: input.notes?.trim() || null,
+        sortOrder: await getNextGuestSortOrder(input.eventId),
+        createdAt: now,
+        updatedAt: now,
+      });
 
-        if (!existing) {
-          throw new ActionError({
-            code: "NOT_FOUND",
-            message: "Guest not found.",
-          });
-        }
+      const guestCount = (
+        await db.select({ id: EventGuests.id }).from(EventGuests).where(eq(EventGuests.eventId, input.eventId))
+      ).length;
 
-        if (existing.eventId !== event.id) {
-          throw new ActionError({
-            code: "FORBIDDEN",
-            message: "You cannot move guests to another event.",
-          });
-        }
-
-        const updates: Partial<typeof EventGuests.$inferSelect> = {
-          name: input.name,
-          email: input.email,
-          phone: input.phone,
-          rsvpStatus: input.rsvpStatus,
-          notes: input.notes,
-          invitedAt: parseOptionalDate(input.invitedAt),
-          respondedAt: parseOptionalDate(input.respondedAt),
-        };
-
-        await db
-          .update(EventGuests)
-          .set(updates)
-          .where(eq(EventGuests.id, input.id));
-
-        return {
-          success: true,
-          data: { guest: { ...existing, ...updates } },
-        };
+      if (guestCount === 10) {
+        await sendHighSignalNotification({
+          userId: user.id,
+          title: "Guest list milestone",
+          body: "You reached 10 guests for this event.",
+          level: "success",
+        });
       }
 
-      const guest = {
-        id: crypto.randomUUID(),
-        eventId: event.id,
-        name: input.name,
-        email: input.email,
-        phone: input.phone,
-        rsvpStatus: input.rsvpStatus,
-        notes: input.notes,
-        invitedAt: parseOptionalDate(input.invitedAt),
-        respondedAt: parseOptionalDate(input.respondedAt),
-        createdAt: now,
-      } satisfies typeof EventGuests.$inferSelect;
+      return { success: true };
+    },
+  }),
 
-      await db.insert(EventGuests).values(guest);
+  updateEventGuest: defineAction({
+    input: z.object({
+      id: z.string(),
+      name: z.string().min(1),
+      email: z.string().email().nullish(),
+      phone: z.string().max(50).nullish(),
+      status: guestStatusSchema,
+      notes: z.string().max(2000).nullish(),
+    }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      const existing = await getGuestForOwnedEvent(user.id, input.id);
 
-      return {
-        success: true,
-        data: { guest },
-      };
+      await db
+        .update(EventGuests)
+        .set({
+          name: input.name.trim(),
+          email: input.email?.trim() || null,
+          phone: input.phone?.trim() || null,
+          status: input.status,
+          notes: input.notes?.trim() || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(EventGuests.id, existing.id));
+
+      return { success: true };
     },
   }),
 
@@ -401,23 +329,53 @@ export const server = {
     input: z.object({ id: z.string() }),
     handler: async (input, context) => {
       const user = requireUser(context);
-      const existing = (
-        await db.select().from(EventGuests).where(eq(EventGuests.id, input.id))
-      )[0];
+      const existing = await getGuestForOwnedEvent(user.id, input.id);
+      await db.delete(EventGuests).where(eq(EventGuests.id, existing.id));
+      return { success: true };
+    },
+  }),
 
-      if (!existing) {
-        throw new ActionError({
-          code: "NOT_FOUND",
-          message: "Guest not found.",
-        });
+  reorderEventGuests: defineAction({
+    input: z.object({ eventId: z.string(), orderedGuestIds: z.array(z.string()).min(1) }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      await getOwnedEvent(user.id, input.eventId);
+
+      const guests = await db.select().from(EventGuests).where(eq(EventGuests.eventId, input.eventId));
+      const ids = new Set(guests.map((guest) => guest.id));
+      if (!input.orderedGuestIds.every((id) => ids.has(id))) {
+        return { success: false, message: "Invalid guest order payload." };
       }
 
-      await getEventForUser(user.id, existing.eventId);
+      await Promise.all(
+        input.orderedGuestIds.map((id, index) =>
+          db.update(EventGuests).set({ sortOrder: index + 1, updatedAt: new Date() }).where(eq(EventGuests.id, id)),
+        ),
+      );
 
-      await db.delete(EventGuests).where(eq(EventGuests.id, input.id));
+      return { success: true };
+    },
+  }),
 
+  listEvents: defineAction({
+    input: z.object({ includeArchived: z.boolean().default(true) }).optional(),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      const items = await listEvents(user.id);
       return {
         success: true,
+        data: (input?.includeArchived ?? true) ? items : items.filter((item) => item.status !== "archived"),
+      };
+    },
+  }),
+
+  getEventDetail: defineAction({
+    input: z.object({ id: z.string() }),
+    handler: async (input, context) => {
+      const user = requireUser(context);
+      return {
+        success: true,
+        data: await getEventDetail(user.id, input.id),
       };
     },
   }),
