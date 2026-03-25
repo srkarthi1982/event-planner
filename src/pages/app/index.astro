@@ -1,0 +1,168 @@
+---
+import { actions } from "astro:actions";
+import { AvButton, AvCard, AvContainer, AvEmptyState } from "@ansiversa/components";
+import AvMiniAppBar from "../../components/AvMiniAppBar.astro";
+import AppShell from "../../layouts/AppShell.astro";
+import { listEvents } from "../../lib/events";
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect("/");
+
+let flash: { type: "success" | "error"; message: string } | null = null;
+
+function value(formData: FormData, key: string) {
+  const raw = formData.get(key);
+  return typeof raw === "string" ? raw : "";
+}
+
+if (Astro.request.method === "POST") {
+  const formData = await Astro.request.formData();
+  const intent = value(formData, "intent");
+
+  try {
+    if (intent === "create-event") {
+      await Astro.callAction(actions.createEvent, {
+        title: value(formData, "title"),
+        eventType: value(formData, "eventType") || null,
+        location: value(formData, "location") || null,
+        startsAt: value(formData, "startsAt") || null,
+        endsAt: value(formData, "endsAt") || null,
+        notes: value(formData, "notes") || null,
+        status: (value(formData, "status") || "planned") as "draft" | "planned" | "completed" | "archived" | "cancelled",
+      });
+      flash = { type: "success", message: "Event created." };
+    }
+
+    if (intent === "update-event") {
+      await Astro.callAction(actions.updateEvent, {
+        id: value(formData, "id"),
+        title: value(formData, "title"),
+        eventType: value(formData, "eventType") || null,
+        location: value(formData, "location") || null,
+        startsAt: value(formData, "startsAt") || null,
+        endsAt: value(formData, "endsAt") || null,
+        notes: value(formData, "notes") || null,
+        status: value(formData, "status") as "draft" | "planned" | "completed" | "archived" | "cancelled",
+      });
+      flash = { type: "success", message: "Event updated." };
+    }
+
+    if (intent === "archive-event") {
+      await Astro.callAction(actions.archiveEvent, { id: value(formData, "id") });
+      flash = { type: "success", message: "Event archived." };
+    }
+
+    if (intent === "restore-event") {
+      await Astro.callAction(actions.restoreEvent, { id: value(formData, "id"), status: "planned" });
+      flash = { type: "success", message: "Event restored." };
+    }
+  } catch (error) {
+    flash = { type: "error", message: error instanceof Error ? error.message : "Something went wrong." };
+  }
+}
+
+const events = await listEvents(user.id);
+const activeEvents = events.filter((item) => item.status !== "archived");
+const archivedEvents = events.filter((item) => item.status === "archived");
+
+const summary = {
+  total: activeEvents.length,
+  planned: activeEvents.filter((item) => item.status === "planned" || item.status === "draft").length,
+  completed: activeEvents.filter((item) => item.status === "completed").length,
+  archived: archivedEvents.length,
+};
+---
+
+<AppShell title="Event Planner Workspace" description="Your event planning workspace.">
+  <AvMiniAppBar title="Event Planner" />
+  <main
+    class="min-h-screen bg-slate-950 pb-16 text-slate-100"
+    x-data
+    x-init="$store.eventPlanner.init({ activeFilter: 'overview', events: [] })"
+  >
+    <AvContainer size="wide" className="space-y-6 py-6">
+      {flash && (
+        <div class={`rounded-xl border px-4 py-3 text-sm ${flash.type === "success" ? "border-emerald-700 bg-emerald-950/60 text-emerald-200" : "border-rose-700 bg-rose-950/60 text-rose-200"}`}>
+          {flash.message}
+        </div>
+      )}
+
+      <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <AvCard className="p-4"><p class="text-xs text-slate-400">Total events</p><p class="text-2xl font-semibold">{summary.total}</p></AvCard>
+        <AvCard className="p-4"><p class="text-xs text-slate-400">Planned</p><p class="text-2xl font-semibold">{summary.planned}</p></AvCard>
+        <AvCard className="p-4"><p class="text-xs text-slate-400">Completed</p><p class="text-2xl font-semibold">{summary.completed}</p></AvCard>
+        <AvCard className="p-4"><p class="text-xs text-slate-400">Archived</p><p class="text-2xl font-semibold">{summary.archived}</p></AvCard>
+      </section>
+
+      <section class="grid gap-6 xl:grid-cols-[2fr,1fr]">
+        <AvCard className="space-y-4 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold">Events</h2>
+            <AvButton x-on:click="$store.eventPlanner.openDrawer('createEvent')" size="sm">Create event</AvButton>
+          </div>
+          {activeEvents.length === 0 ? (
+            <AvEmptyState title="No events yet" description="Create your first event to get started." />
+          ) : (
+            <ul class="space-y-3">
+              {activeEvents.map((event) => (
+                <li class="rounded-xl border border-slate-800 bg-slate-900/80 p-4">
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div class="space-y-1">
+                      <a href={`/app/events/${event.id}`} class="text-base font-semibold text-white hover:text-sky-300">{event.title}</a>
+                      <p class="text-xs text-slate-400">{event.eventType ?? "General"} · {event.location ?? "No location"}</p>
+                      <p class="text-xs text-slate-500">Status: {event.status}</p>
+                    </div>
+                    <div class="flex gap-2">
+                      <form method="post"><input type="hidden" name="intent" value="archive-event" /><input type="hidden" name="id" value={event.id} /><button class="rounded-lg border border-slate-700 px-3 py-1 text-xs hover:border-slate-500">Archive</button></form>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </AvCard>
+
+        <AvCard className="space-y-3 p-4">
+          <h2 class="text-lg font-semibold">Archived</h2>
+          {archivedEvents.length === 0 ? (
+            <p class="text-sm text-slate-400">No archived events yet.</p>
+          ) : (
+            <ul class="space-y-2">
+              {archivedEvents.map((event) => (
+                <li class="rounded-lg border border-slate-800 p-3">
+                  <p class="text-sm font-medium">{event.title}</p>
+                  <form method="post" class="mt-2">
+                    <input type="hidden" name="intent" value="restore-event" />
+                    <input type="hidden" name="id" value={event.id} />
+                    <button class="text-xs text-sky-300 hover:text-sky-200">Restore</button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )}
+        </AvCard>
+      </section>
+    </AvContainer>
+
+    <section
+      class="fixed inset-0 z-20 hidden items-end justify-center bg-slate-950/70 p-4"
+      :class="$store.eventPlanner.drawers.createEvent ? 'flex' : 'hidden'"
+      x-cloak
+    >
+      <AvCard className="w-full max-w-2xl space-y-4 p-5">
+        <div class="flex items-center justify-between"><h3 class="text-lg font-semibold">Create event</h3><button class="text-sm text-slate-300" x-on:click="$store.eventPlanner.closeDrawer('createEvent')">Close</button></div>
+        <form method="post" class="grid gap-3 sm:grid-cols-2">
+          <input type="hidden" name="intent" value="create-event" />
+          <label class="sm:col-span-2 text-sm">Title <input required name="title" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2" /></label>
+          <label class="text-sm">Type <select name="eventType" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2"><option value="">General</option><option>birthday</option><option>meeting</option><option>wedding</option><option>trip</option><option>party</option><option>personal</option><option>other</option></select></label>
+          <label class="text-sm">Status <select name="status" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2"><option value="planned">planned</option><option value="draft">draft</option><option value="completed">completed</option><option value="cancelled">cancelled</option></select></label>
+          <label class="sm:col-span-2 text-sm">Location <input name="location" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2" /></label>
+          <label class="text-sm">Start <input type="datetime-local" name="startsAt" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2" /></label>
+          <label class="text-sm">End <input type="datetime-local" name="endsAt" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2" /></label>
+          <label class="sm:col-span-2 text-sm">Notes <textarea name="notes" rows="3" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2"></textarea></label>
+          <div class="sm:col-span-2 flex justify-end"><button class="rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950">Save event</button></div>
+        </form>
+      </AvCard>
+    </section>
+  </main>
+</AppShell>

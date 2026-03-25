@@ -26,5 +26,6 @@ MANDATORY: After completing each task, update this repo’s AGENTS.md Task Log (
 
 ## Task Log (Recent)
 - Keep newest first; include date and short summary.
+- 2026-03-25 Implemented Event Planner V1 (Astro DB schema, protected /app workspace + /app/events/[id], actions ownership checks, archive/restore, Alpine global store, dashboard+notification webhooks). Verified `npm run build`; `npm run typecheck` blocked by missing @astrojs/check in restricted registry.
 - 2026-02-09 Added repo-level AGENTS.md enforcement contract (workspace reference + mandatory task-log update rule).
 - 2026-02-09 Initialized repo AGENTS baseline for single-repo Codex/AI safety.
