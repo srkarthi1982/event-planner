@@ -8,10 +8,11 @@
     "build": "astro build --remote",
     "preview": "astro preview",
     "astro": "astro",
-    "typecheck": "astro check"
+    "typecheck": "astro check",
+    "db:push": "astro db push --remote"
   },
   "dependencies": {
-    "@ansiversa/components": "^0.0.75",
+    "@ansiversa/components": "^0.0.169",
     "@astrojs/alpinejs": "^0.4.9",
     "@astrojs/db": "^0.18.3",
     "@astrojs/vercel": "^9.0.2",
@@ -20,5 +21,9 @@
     "alpinejs": "^3.15.2",
     "astro": "^5.16.2",
     "tailwindcss": "^4.1.17"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.8",
+    "typescript": "^5.9.3"
   }
 }

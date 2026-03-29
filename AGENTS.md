@@ -25,6 +25,8 @@ MANDATORY: After completing each task, update this repo’s AGENTS.md Task Log (
 - Review this repo's existing AGENTS.md Task Log history before making changes.
 
 ## Task Log (Recent)
+- 2026-03-29 Completed readiness tooling alignment: installed local typecheck dependencies, standardized `db:push` support, preserved app-specific production DB isolation config, and prepared repo for freeze-safe commit/push without app logic changes.
+- 2026-03-29 Synced local repo to `origin/main` after stale local seed commit divergence blocked pull; preserved prior local state on `backup/pre-pull-sync-2026-03-29`.
 - Keep newest first; include date and short summary.
 - 2026-03-25 Implemented Event Planner V1 (Astro DB schema, protected /app workspace + /app/events/[id], actions ownership checks, archive/restore, Alpine global store, dashboard+notification webhooks). Verified `npm run build`; `npm run typecheck` blocked by missing @astrojs/check in restricted registry.
 - 2026-02-09 Added repo-level AGENTS.md enforcement contract (workspace reference + mandatory task-log update rule).
