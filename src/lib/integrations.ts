@@ -29,13 +29,13 @@ export async function syncDashboardSummary(userId: string) {
   const items = await db
     .select()
     .from(Events)
-    .where(eq(Events.userId, userId));
+    .where(eq(Events.ownerUserId, userId));
 
   const latest = (
     await db
       .select({ title: Events.title })
       .from(Events)
-      .where(eq(Events.userId, userId))
+      .where(eq(Events.ownerUserId, userId))
       .orderBy(desc(Events.updatedAt))
       .limit(1)
   )[0];

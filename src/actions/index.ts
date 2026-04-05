@@ -39,7 +39,7 @@ export const server = {
 
       const event = {
         id: crypto.randomUUID(),
-        userId: user.id,
+        ownerUserId: user.id,
         title: input.title.trim(),
         eventType: input.eventType ?? null,
         location: input.location?.trim() || null,

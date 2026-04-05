@@ -4,7 +4,7 @@ export default async function seed() {
   const now = new Date();
   await db.insert(Events).values({
     id: crypto.randomUUID(),
-    userId: "demo-user",
+    ownerUserId: "demo-user",
     title: "Welcome event",
     eventType: "personal",
     location: "",

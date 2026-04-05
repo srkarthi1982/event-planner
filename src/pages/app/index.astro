@@ -15,45 +15,61 @@ function value(formData: FormData, key: string) {
   return typeof raw === "string" ? raw : "";
 }
 
+const EVENT_TYPES = ["birthday", "meeting", "wedding", "trip", "party", "personal", "other"] as const;
+const EVENT_STATUSES = ["draft", "planned", "completed", "archived", "cancelled"] as const;
+
+type EventTypeValue = (typeof EVENT_TYPES)[number];
+type EventStatusValue = (typeof EVENT_STATUSES)[number];
+
+function eventTypeValue(formData: FormData) {
+  const raw = value(formData, "eventType");
+  return EVENT_TYPES.includes(raw as EventTypeValue) ? (raw as EventTypeValue) : null;
+}
+
+function eventStatusValue(formData: FormData) {
+  const raw = value(formData, "status");
+  return EVENT_STATUSES.includes(raw as EventStatusValue) ? (raw as EventStatusValue) : "planned";
+}
+
 if (Astro.request.method === "POST") {
   const formData = await Astro.request.formData();
   const intent = value(formData, "intent");
 
   try {
     if (intent === "create-event") {
-      await Astro.callAction(actions.createEvent, {
+      await Astro.callAction(actions.createEvent.orThrow, {
         title: value(formData, "title"),
-        eventType: value(formData, "eventType") || null,
+        eventType: eventTypeValue(formData),
         location: value(formData, "location") || null,
         startsAt: value(formData, "startsAt") || null,
         endsAt: value(formData, "endsAt") || null,
         notes: value(formData, "notes") || null,
-        status: (value(formData, "status") || "planned") as "draft" | "planned" | "completed" | "archived" | "cancelled",
+        status: eventStatusValue(formData),
       });
       flash = { type: "success", message: "Event created." };
     }
 
     if (intent === "update-event") {
-      await Astro.callAction(actions.updateEvent, {
+      await Astro.callAction(actions.updateEvent.orThrow, {
         id: value(formData, "id"),
         title: value(formData, "title"),
-        eventType: value(formData, "eventType") || null,
+        eventType: eventTypeValue(formData),
         location: value(formData, "location") || null,
         startsAt: value(formData, "startsAt") || null,
         endsAt: value(formData, "endsAt") || null,
         notes: value(formData, "notes") || null,
-        status: value(formData, "status") as "draft" | "planned" | "completed" | "archived" | "cancelled",
+        status: eventStatusValue(formData),
       });
       flash = { type: "success", message: "Event updated." };
     }
 
     if (intent === "archive-event") {
-      await Astro.callAction(actions.archiveEvent, { id: value(formData, "id") });
+      await Astro.callAction(actions.archiveEvent.orThrow, { id: value(formData, "id") });
       flash = { type: "success", message: "Event archived." };
     }
 
     if (intent === "restore-event") {
-      await Astro.callAction(actions.restoreEvent, { id: value(formData, "id"), status: "planned" });
+      await Astro.callAction(actions.restoreEvent.orThrow, { id: value(formData, "id"), status: "planned" });
       flash = { type: "success", message: "Event restored." };
     }
   } catch (error) {

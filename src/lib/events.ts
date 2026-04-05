@@ -42,7 +42,7 @@ export async function getOwnedEvent(userId: string, eventId: string) {
     throw new ActionError({ code: "NOT_FOUND", message: "Event not found." });
   }
 
-  if (event.userId !== userId) {
+  if (event.ownerUserId !== userId) {
     throw new ActionError({ code: "FORBIDDEN", message: "You do not have access to this event." });
   }
 
@@ -50,7 +50,11 @@ export async function getOwnedEvent(userId: string, eventId: string) {
 }
 
 export async function listEvents(userId: string) {
-  return db.select().from(Events).where(eq(Events.userId, userId)).orderBy(asc(Events.startsAt), asc(Events.createdAt));
+  return db
+    .select()
+    .from(Events)
+    .where(eq(Events.ownerUserId, userId))
+    .orderBy(asc(Events.startsAt), asc(Events.createdAt));
 }
 
 export async function getEventDetail(userId: string, eventId: string) {
@@ -95,4 +99,3 @@ export async function getNextGuestSortOrder(eventId: string) {
   const guests = await db.select({ sortOrder: EventGuests.sortOrder }).from(EventGuests).where(eq(EventGuests.eventId, eventId));
   return guests.length ? Math.max(...guests.map((guest) => guest.sortOrder)) + 1 : 1;
 }
-
